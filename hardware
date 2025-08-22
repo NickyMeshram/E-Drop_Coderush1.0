@@ -1,0 +1,109 @@
+#include <WiFi.h>
+#include <FirebaseESP32.h>
+#include <LiquidCrystal.h>
+
+// Replace with your network credentials
+#define WIFI_SSID "OPPO F17 Pro"
+#define WIFI_PASSWORD "King@724"
+
+// Replace with your Firebase details
+#define FIREBASE_HOST "fir-realtimekotlin-470d2-default-rtdb.firebaseio.com"  // ⚡ remove https://
+#define FIREBASE_AUTH "AIi9D7tHiMO0HbtnC5NoJR6NMwc1k8PrIPiu1UD6"  // Legacy Token
+
+// Firebase objects
+FirebaseData firebaseData;
+FirebaseConfig config;
+FirebaseAuth auth;
+
+// Buzzer pin
+#define BUZZER_PIN 5
+
+// LCD pin mapping (change to match your wiring)
+#define RS 14
+#define EN 27
+#define D0 13
+#define D1 12
+#define D2 33
+#define D3 32
+#define D4 25
+#define D5 26
+#define D6 4
+#define D7 2
+
+// Initialize LCD in 8-bit mode
+LiquidCrystal lcd(RS, EN, D0, D1, D2, D3, D4, D5, D6, D7);
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // Initialize LCD
+  lcd.begin(16, 2);
+  lcd.setCursor(0, 0);
+  lcd.print("Connecting WiFi");
+
+  // Connect Wi-Fi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(300);
+  }
+  Serial.println();
+  Serial.print("Connected! IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Connected");
+
+  // Firebase setup
+  config.host = FIREBASE_HOST;
+  config.signer.tokens.legacy_token = FIREBASE_AUTH;
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  lcd.setCursor(0, 1);
+  lcd.print("Firebase Ready");
+  delay(2000);
+  lcd.clear();
+}
+
+void loop() {
+  // 🔹 Buzzer Control
+  if (Firebase.getInt(firebaseData, "/buzzer")) {
+    if (firebaseData.dataType() == "int") {
+      int buzzerState = firebaseData.intData();
+      if (buzzerState == 1) {
+        digitalWrite(BUZZER_PIN, HIGH);
+        Serial.println("Buzzer ON");
+      } else {
+        digitalWrite(BUZZER_PIN, LOW);
+        Serial.println("Buzzer OFF");
+      }
+    }
+  } else {
+    Serial.println("Firebase read failed (buzzer): " + firebaseData.errorReason());
+  }
+
+  // 🔹 LCD Message
+  if (Firebase.getString(firebaseData, "/message")) {
+    if (firebaseData.dataType() == "string") {
+      String msg = firebaseData.stringData();
+      Serial.println("Message: " + msg);
+
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(msg.substring(0, 16));   // Line 1
+
+      if (msg.length() > 16) {
+        lcd.setCursor(0, 1);
+        lcd.print(msg.substring(16, 32)); // Line 2
+      }
+    }
+  } else {
+    Serial.println("Firebase read failed (message): " + firebaseData.errorReason());
+  }
+
+  delay(1500); // Firebase polling interval
+}
