@@ -1,0 +1,158 @@
+import pandas as pd
+import joblib
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+
+# --- Step 1: Load the Saved Model ---
+model = joblib.load("E:/CodeRush/cme_model_firebase.pkl")
+print("Model loaded successfully.")
+
+# --- Step 2: Load New Test Data ---
+test_df = pd.read_csv("cme_test.csv", parse_dates=['timestamp'])
+
+# Normalize column names
+test_df.columns = (
+    test_df.columns.str.strip()
+                   .str.lower()
+                   .str.replace(r'[^\w\s]', '', regex=True)
+                   .str.replace(r'\s+', '_', regex=True)
+)
+
+# --- Step 3: Feature Engineering ---
+test_df['hour'] = test_df['timestamp'].dt.hour
+test_df['day'] = test_df['timestamp'].dt.day
+
+if 'magnetic_field_nt' not in test_df.columns:
+    print("'magnetic_field_nt' column missing. Using default value 0.")
+    test_df['magnetic_field_nt'] = 0
+
+# --- Step 4: Auto-label CME Events (if needed for evaluation) ---
+test_df['cme_event'] = (
+    (test_df['speed_kms'] > 400) &
+    (test_df['kinetic_energy_j'] > 1e23)
+).astype(int)
+
+# --- Step 5: Define Features and Labels ---
+features = [
+    'speed_kms', 'acceleration_ms2', 'angular_width', 'direction_pa',
+    'mass_kg', 'kinetic_energy_j', 'brightness', 'magnetic_field_nt',
+    'solar_wind_speed_kms', 'solar_wind_density_particles_cm3',
+    'hour', 'day'
+]
+
+X_test = test_df[features].fillna(0)
+y_true = test_df['cme_event']
+
+# --- Step 6: Make Predictions ---
+y_pred = model.predict(X_test)
+
+# --- Step 7: Evaluate ---
+print("\n Classification Report:")
+print(classification_report(y_true, y_pred))
+
+print("\n Confusion Matrix:")
+print(confusion_matrix(y_true, y_pred))
+
+accuracy = accuracy_score(y_true, y_pred)
+print(f"\n Accuracy: {accuracy:.4f}")
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+from matplotlib.gridspec import GridSpec
+from sklearn.metrics import (
+    precision_score, recall_score, f1_score,
+    roc_curve, auc, confusion_matrix
+)
+
+# --- Metrics ---
+precision = precision_score(y_true, y_pred)
+recall = recall_score(y_true, y_pred)
+f1 = f1_score(y_true, y_pred)
+
+# --- ROC Curve ---
+y_scores = model.predict_proba(X_test)[:, 1]
+fpr, tpr, _ = roc_curve(y_true, y_scores)
+roc_auc = auc(fpr, tpr)
+
+# --- Confusion Matrix ---
+cm = confusion_matrix(y_true, y_pred)
+
+# --- Feature Importance ---
+importances = model.feature_importances_
+
+# --- CME Distribution ---
+cme_counts = pd.Series(y_pred).value_counts()
+pie_labels = ['Non-CME', 'CME']
+pie_colors = ['lightblue', 'orange']
+
+# --- Prediction Confidence ---
+confidence_bins = y_scores
+
+# --- Alerts by Hour ---
+alert_counts = test_df.copy()
+alert_counts['predicted_cme'] = y_pred
+alerts_by_hour = alert_counts.groupby('hour')['predicted_cme'].sum()
+
+# --- Layout Setup ---
+fig = plt.figure(constrained_layout=True, figsize=(16, 18))
+gs = GridSpec(4, 2, figure=fig)
+
+# --- Title ---
+fig.suptitle("☀️ CME Detection System Analytics Dashboard", fontsize=18)
+
+# --- ROC Curve ---
+ax1 = fig.add_subplot(gs[0, 0])
+ax1.plot(fpr, tpr, label=f"AUC = {roc_auc:.2f}", color='darkgreen')
+ax1.plot([0, 1], [0, 1], 'k--')
+ax1.set_title("ROC Curve")
+ax1.set_xlabel("False Positive Rate")
+ax1.set_ylabel("True Positive Rate")
+ax1.legend()
+
+# --- Confusion Matrix ---
+ax2 = fig.add_subplot(gs[0, 1])
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax2)
+ax2.set_title("Confusion Matrix")
+ax2.set_xlabel("Predicted")
+ax2.set_ylabel("Actual")
+
+# --- Feature Importance ---
+ax3 = fig.add_subplot(gs[1, 0])
+sns.barplot(x=importances, y=features, ax=ax3, palette='viridis')
+ax3.set_title("Feature Importance")
+ax3.set_xlabel("Importance Score")
+ax3.set_ylabel("Feature")
+
+# --- Prediction Confidence Histogram ---
+ax4 = fig.add_subplot(gs[1, 1])
+ax4.hist(confidence_bins, bins=20, color='purple', alpha=0.7)
+ax4.set_title("Prediction Confidence")
+ax4.set_xlabel("Probability of CME")
+ax4.set_ylabel("Frequency")
+
+# --- CME Distribution Pie Chart ---
+ax5 = fig.add_subplot(gs[2, 0])
+ax5.pie(cme_counts, labels=pie_labels, autopct='%1.1f%%',
+        colors=pie_colors, startangle=140)
+ax5.set_title("Predicted CME Distribution")
+ax5.axis('equal')
+
+# --- Alerts by Hour ---
+ax6 = fig.add_subplot(gs[2, 1])
+alerts_by_hour.plot(kind='bar', color='crimson', ax=ax6)
+ax6.set_title("Predicted CME Alerts by Hour")
+ax6.set_xlabel("Hour of Day")
+ax6.set_ylabel("Number of Alerts")
+
+# --- Metrics Summary (Text Box) ---
+ax7 = fig.add_subplot(gs[3, :])
+ax7.axis('off')
+metrics_text = (
+    f"📊 Model Performance Metrics\n"
+    f"• Precision: {precision:.4f}\n"
+    f"• Recall:    {recall:.4f}\n"
+    f"• F1 Score:  {f1:.4f}"
+)
+ax7.text(0.01, 0.5, metrics_text, fontsize=14, verticalalignment='center')
+
+plt.show()
